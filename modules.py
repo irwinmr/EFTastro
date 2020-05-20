@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import math
+import random
 #------------------------------------------------------------------------------------------
 #Units and conversions:
 #------------------------------------------------------------------------------------------
@@ -72,6 +73,154 @@ class Particle:
            
     #def newname(self, new_name):
     #    self.name = new_name 
+
+class Binaryecc:
+    
+    def __init__(self, pri, sec, orbd, ecc, mean): #primary, secondary, orbital distance, eccentricity
+        
+        mr = pri.mass/sec.mass #Mass ratio
+        mt = pri.mass + sec.mass #Total mass binary
+        
+        self.orbd = orbd
+        
+        #Add eccentricity
+        ecc_bin = ecc
+        kk = 0.85
+        mean_anom = mean #2.*np.pi - 0.1 #(2.*np.pi)*random.random() #mean_anomaly
+        E0 = mean_anom + np.sign(np.sin(mean_anom))*kk*ecc_bin
+        E1 = E0 - (E0 - ecc_bin*np.sin(E0) - mean_anom)/(1 - ecc_bin*np.cos(E0))
+        ifor = 8
+        Ei1 = E0 #Define E_{i-1}
+        for i in range(ifor):
+            Ei = Ei1 - (Ei1 - ecc_bin*np.sin(Ei1) - mean_anom)/(1 - ecc_bin*np.cos(Ei1))   
+            Ei1 = Ei
+        ecc_anom = Ei
+        bin_f = 2.*np.arctan(((1+ecc_bin)/(1-ecc_bin))**(1./2))*np.tan(ecc_anom/2.)
+        #Redefinition of mass variables
+        mb1 = pri.mass
+        mb2 = sec.mass
+        Mb12_SI     = (mb1+mb2)*M_sun_SI
+        pfac_SI     = ((orbd*R_sun_SI)*(1.-ecc_bin**2))
+        hfac_SI     = (np.sqrt(G_new_SI*Mb12_SI*pfac_SI))
+        rdist_SI    = (pfac_SI/(1.+ecc_bin*np.cos(bin_f)))
+        v_ang_SI    = (hfac_SI/rdist_SI)
+        v_rad_SI    = ((ecc_bin*np.sin(bin_f)/pfac_SI)*hfac_SI)
+        #calc pos and vel of reduced-mass object:
+        posx_U  = - ((rdist_SI*np.cos(bin_f))/R_sun_SI)
+        posy_U  =   ((rdist_SI*np.sin(bin_f))/R_sun_SI)
+        velx_U  = - ((v_ang_SI*np.sin(bin_f) - v_rad_SI*np.cos(bin_f))*(kmsec_U/1000.))
+        vely_U  = - ((v_rad_SI*np.sin(bin_f) + v_ang_SI*np.cos(bin_f))*(kmsec_U/1000.))
+        #define pos/vel vecs:
+        posvec_U = np.array([posx_U, posy_U, 0.0])
+        velvec_U = np.array([velx_U, vely_U, 0.0])
+
+        #change to binary COM:
+        b1_posxyz_binCM    = - (mb2/(mb1+mb2))*posvec_U
+        b1_velxyz_binCM    = - (mb2/(mb1+mb2))*velvec_U
+        b2_posxyz_binCM    =   (mb1/(mb1+mb2))*posvec_U
+        b2_velxyz_binCM    =   (mb1/(mb1+mb2))*velvec_U
+
+	
+        N = 2
+        self.r = np.zeros((N,3))
+        self.v = np.zeros((N,3))
+        m1 = pri.mass
+        m2 = sec.mass
+        redvel = np.sqrt((m1+m2)/orbd)
+        self.redvel = redvel
+        #self.r[0] = np.array([(m2/mt)*orbd,0,0])
+        #self.r[1] = np.array([-(m1/mt)*orbd,0,0])
+        #self.v[0] = np.array([0,(m2/mt)*redvel,0])
+        #self.v[1] = np.array([0,-(m1/mt)*redvel,0])
+        self.r[0] = b1_posxyz_binCM
+        self.r[1] = b2_posxyz_binCM
+        self.v[0] = b1_velxyz_binCM
+        self.v[1] = b2_velxyz_binCM
+        
+        ##################
+        #Period
+        ##################
+        
+        periodctime = 2.0*np.pi*(orbd**(3./2))/np.sqrt(mt)
+        self.periodct = periodctime
+        self.period =  periodctime*time_U/(24*60*60)#Period in days
+        
+        ##################
+        #Roche Lobe
+        ##################
+        
+        self.rochepri = (0.49*(mr**(2./3))*orbd)/(0.6*(mr**(2./3))+ np.log(1+mr**(1./3)))
+        
+        self.rochesec = (0.49*(mr**(-2./3))*orbd)/(0.6*(mr**(-2./3))+ np.log(1+mr**(-1./3)))
+        
+        if self.rochepri <= pri.radi:
+            self.rochefill = True
+                
+        elif self.rochesec <= sec.radi:
+            self.rochefill = True
+            
+        else: 
+            self.rochefill = False
+            
+        ##################
+        #Collision
+        ##################
+            
+        if (pri.radi + sec.radi) <= orbd:
+            self.coll = True
+        
+        else:
+            self.coll = False 
+            
+        ##################
+        #Tidal Radius
+        ##################
+        
+        if pri.name == "BH":
+            self.tidalrpri = pri.radi #Set equal to its radius
+        
+        else:
+            self.tidalrpri = pri.radi*(sec.mass/pri.mass)**(1./3)
+        
+        if sec.name == "BH":
+            self.tidalrsec = sec.radi
+        else:
+            self.tidalrsec = sec.radi*(pri.mass/sec.mass)**(1./3)
+    
+        ##################
+        #Spin Effects
+        ##################
+        
+        if pri.name == "BH":
+            self.spineffpri = 0#(3./(2*pri.mass))*(pri.nspin*(pri.spin**2))*(1./orbd**2)
+        
+        else:
+            self.spineffpri = (3./(2*pri.mass))*(pri.nspin*(pri.spin**2))*(1./orbd**2)
+            
+        if sec.name == "BH":
+            self.spineffsec = 0#(3./(2*sec.mass))*(sec.nspin*(sec.spin**2))*(1./orbd**2)
+        
+        else:
+            self.spineffsec = (3./(2*sec.mass))*(sec.nspin*(sec.spin**2))*(1./orbd**2)
+            
+        ##################
+        #Tidal Effects
+        ##################
+        
+        #Correct/check here tidal effects
+        
+        if pri.name == "BH":
+            self.tideeffpri = 0#(9./(1*pri.mass))*(pri.ntide*sec.mass)*(1./orbd**5)
+        
+        else:
+            self.tideeffpri = (9./(1*pri.mass))*(pri.ntide*sec.mass)*(1./orbd**5)
+            
+        if sec.name == "BH":
+            self.tideeffsec = 0#(9./(1*sec.mass))*(sec.ntide*pri.mass)*(1./orbd**5)
+        
+        else:
+            self.tideeffsec = (9./(1*sec.mass))*(sec.ntide*pri.mass)*(1./orbd**5)
+            
         
 class Binary:
     
