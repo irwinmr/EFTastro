@@ -35,13 +35,22 @@ class Particle:
         if name == "BH":
             self.name = "BH"
             self.mass = mass
-            self.radi = (2*G_new_SI*self.mass*M_sun_SI/c_SI**2)/1000
             self.spin = spin
+            self.radisch = (2*G_new_SI*self.mass*M_sun_SI/c_SI**2)/1000
+            if np.linalg.norm((self.spin)) > 0:
+                self.angularm = (self.radisch**2)*np.linalg.norm(self.spin)/c_CU
+                self.radiplus = (self.radisch + (self.radisch**2 - 4*self.angularm**2 )**(1./2))/2 
+                self.inertiam = self.mass*(self.radiplus**2) 
+            elif np.linalg.norm((self.spin)) == 0:
+                self.angularm = 0
+                self.radiplus = self.radisch
+                self.inertiam = 0
             self.rdis = None
             self.sdis = None
             self.ntide = 0
             self.ndtide = 0
-            self.eta = (1./360)*(self.radi**6)/(c_CU) 
+            self.nspin = 0
+            self.eta = (1./360)*(self.radisch**6)/(c_CU) 
         
         elif name == "MS":
             self.name = name
@@ -69,8 +78,16 @@ class Particle:
             self.mass = mass
             self.radi = radi
             self.spin = spin
+            self.inertiam = 0.21*(self.mass*self.radi**2)/(1- 2*self.mass/(self.radi*c_CU**2))
+            #if np.linalg.norm((self.spin)) > 0:
+                #self.angularm = (self.radi**2)*np.linalg.norm(self.spin)/c_CU
+                #self.radiplus = (self.radisch + (self.radisch**2 - 4*self.angularm**2 )**(1./2))/2
+            #    self.inertiam = 0.21*(self.mass*self.radi**2)/(1- 2*self.mass/(self.radi*c_CU**2))
+            #elif np.linalg.norm((self.spin)) == 0: 
+            #    self.inertiam = 0
             self.sdis = (self.mass/((self.radi)**3))**(1./2)
             self.ntide = (2./3)*k2ns*(self.radi**5)  # n = (2/3)*k*l^5
+            self.eta = 0 #Need to find it from simulations
             self.nspin = (2./3)*k2ns*(self.radi**5) # Same as n_tidal in Newtonian Limit
             self.ndtide = (1./2)*kdns*(self.radi**7/c_CU**2)
             self.info = "Neutron Star. Polytropic Index n = [0.5,1] "
@@ -83,6 +100,153 @@ class Particle:
            
     #def newname(self, new_name):
     #    self.name = new_name 
+class Binary:
+    
+    def __init__(self, pri, sec, orbd, ecc): #primary, secondary, orbital distance, eccentricity
+        
+        mr = pri.mass/sec.mass #Mass ratio
+        mt = pri.mass + sec.mass #Total mass binary
+        
+        self.orbd = orbd
+        
+        N = 2
+        self.r = np.zeros((N,3))
+        self.v = np.zeros((N,3))
+        self.S = np.zeros((N,3))
+        m1 = pri.mass
+        m2 = sec.mass
+        redvel = np.sqrt((m1+m2)/orbd)
+        self.redvel = redvel
+        self.r[0] = np.array([(m2/mt)*orbd,0,0])
+        self.r[1] = np.array([-(m1/mt)*orbd,0,0])
+        self.v[0] = np.array([0,(m2/mt)*redvel,0])
+        self.v[1] = np.array([0,-(m1/mt)*redvel,0])
+        self.S[0] = pri.spin
+        self.S[1] = sec.spin
+        
+        ##################
+        #Period
+        ##################
+        
+        periodctime = 2.0*np.pi*(orbd**(3./2))/np.sqrt(mt)
+        self.periodct = periodctime
+        self.period =  periodctime*time_U/(24*60*60)#Period in days
+        '''
+        ##################
+        #Roche Lobe
+        ##################
+        
+        self.rochepri = (0.49*(mr**(2./3))*orbd)/(0.6*(mr**(2./3))+ np.log(1+mr**(1./3)))
+        
+        self.rochesec = (0.49*(mr**(-2./3))*orbd)/(0.6*(mr**(-2./3))+ np.log(1+mr**(-1./3)))
+        
+        if self.rochepri <= pri.radi:
+            self.rochefill = True
+                
+        elif self.rochesec <= sec.radi:
+            self.rochefill = True
+            
+        else: 
+            self.rochefill = False
+            
+        ##################
+        #Collision
+        ##################
+            
+        if (pri.radi + sec.radi) <= orbd:
+            self.coll = True
+        
+        else:
+            self.coll = False 
+            
+        '''
+        ##################
+        #Tidal Radius
+        ##################
+        
+        if pri.name == "BH":
+            self.tidalrpri = pri.radisch #Set equal to its radius
+        
+        else:
+            self.tidalrpri = pri.radi*(sec.mass/pri.mass)**(1./3)
+        
+        if sec.name == "BH":
+            self.tidalrsec = sec.radisch
+        else:
+            self.tidalrsec = sec.radi*(pri.mass/sec.mass)**(1./3)
+       
+        ##################
+        #Time to merge
+        ##################
+        self.mergertime = (5/256)*(self.orbd**4)*(c_CU**5)*(1./(pri.mass*sec.mass*(pri.mass+sec.mass)))
+        ##################
+        #Spin Effects
+        ##################
+        
+        if pri.name == "BH":
+            self.spineffpri = 0#(3./(2*pri.mass))*(pri.nspin*(pri.spin**2))*(1./orbd**2)
+        
+        else:
+            self.spineffpri = (3./(2*pri.mass))*(pri.nspin*(pri.spin**2))*(1./orbd**2)
+            
+        if sec.name == "BH":
+            self.spineffsec = 0#(3./(2*sec.mass))*(sec.nspin*(sec.spin**2))*(1./orbd**2)
+        
+        else:
+            self.spineffsec = (3./(2*sec.mass))*(sec.nspin*(sec.spin**2))*(1./orbd**2)
+            
+        ##################
+        #Tidal Effects
+        ##################
+        
+        #Correct/check here tidal effects
+        
+        if pri.name == "BH":
+            self.tideeffpri = 0#(9./(1*pri.mass))*(pri.ntide*sec.mass)*(1./orbd**5)
+        
+        else:
+            self.tideeffpri = -(9./(1*pri.mass))*(pri.ntide*sec.mass)*(1./orbd**5)
+            
+        if sec.name == "BH":
+            self.tideeffsec = 0#(9./(1*sec.mass))*(sec.ntide*pri.mass)*(1./orbd**5)
+        
+        else:
+            self.tideeffsec = -(9./(1*sec.mass))*(sec.ntide*pri.mass)*(1./orbd**5)
+            
+        ##################
+        #Dynamical tides
+        ##################
+        
+        if pri.name == "BH":
+            self.dyntideeffpri = 0#(9./(1*pri.mass))*(pri.ntide*sec.mass)*(1./orbd**5)
+        
+        else:
+            self.dyntideeffpri = -(18./(1*pri.mass))*(pri.ndtide*sec.mass)*(1./orbd**7)
+            
+        if sec.name == "BH":
+            self.dyntideeffsec = 0#(9./(1*sec.mass))*(sec.ntide*pri.mass)*(1./orbd**5)
+        
+        else:
+            self.dyntideeffsec = -(18./(1*sec.mass))*(sec.ndtide*pri.mass)*(1./orbd**7)
+        
+        ##################
+        #Dissipative Effects
+        ##################
+        
+        if pri.name == "BH":
+            self.disseffpri = -(9./(1*pri.mass))*(pri.eta*sec.mass)*(1./orbd**6)
+        
+        else:
+            self.disseffpri = 0 #(9./(1*pri.mass))*(pri.ntide*sec.mass)*(1./orbd**5)
+            
+        if sec.name == "BH":
+            self.disseffsec = -(9./(1*sec.mass))*(sec.eta*pri.mass)*(1./orbd**6)
+        
+        else:
+            self.disseffsec = 0 #(9./(1*sec.mass))*(sec.ntide*pri.mass)*(1./orbd**5)     
+        
+
+    
 
 class Binaryecc:
     
@@ -268,115 +432,7 @@ class Binaryecc:
         else:
             self.disseffsec = 0 #(9./(1*sec.mass))*(sec.ntide*pri.mass)*(1./orbd**5)     
         
-class Binary:
-    
-    def __init__(self, pri, sec, orbd, ecc): #primary, secondary, orbital distance, eccentricity
-        
-        mr = pri.mass/sec.mass #Mass ratio
-        mt = pri.mass + sec.mass #Total mass binary
-        
-        self.orbd = orbd
-        
-        N = 2
-        self.r = np.zeros((N,3))
-        self.v = np.zeros((N,3))
-        m1 = pri.mass
-        m2 = sec.mass
-        redvel = np.sqrt((m1+m2)/orbd)
-        self.redvel = redvel
-        self.r[0] = np.array([(m2/mt)*orbd,0,0])
-        self.r[1] = np.array([-(m1/mt)*orbd,0,0])
-        self.v[0] = np.array([0,(m2/mt)*redvel,0])
-        self.v[1] = np.array([0,-(m1/mt)*redvel,0])
-        
-        ##################
-        #Period
-        ##################
-        
-        periodctime = 2.0*np.pi*(orbd**(3./2))/np.sqrt(mt)
-        self.periodct = periodctime
-        self.period =  periodctime*time_U/(24*60*60)#Period in days
-        
-        ##################
-        #Roche Lobe
-        ##################
-        
-        self.rochepri = (0.49*(mr**(2./3))*orbd)/(0.6*(mr**(2./3))+ np.log(1+mr**(1./3)))
-        
-        self.rochesec = (0.49*(mr**(-2./3))*orbd)/(0.6*(mr**(-2./3))+ np.log(1+mr**(-1./3)))
-        
-        if self.rochepri <= pri.radi:
-            self.rochefill = True
-                
-        elif self.rochesec <= sec.radi:
-            self.rochefill = True
-            
-        else: 
-            self.rochefill = False
-            
-        ##################
-        #Collision
-        ##################
-            
-        if (pri.radi + sec.radi) <= orbd:
-            self.coll = True
-        
-        else:
-            self.coll = False 
-            
-        ##################
-        #Tidal Radius
-        ##################
-        
-        if pri.name == "BH":
-            self.tidalrpri = pri.radi #Set equal to its radius
-        
-        else:
-            self.tidalrpri = pri.radi*(sec.mass/pri.mass)**(1./3)
-        
-        if sec.name == "BH":
-            self.tidalrsec = sec.radi
-        else:
-            self.tidalrsec = sec.radi*(pri.mass/sec.mass)**(1./3)
-    
-        ##################
-        #Spin Effects
-        ##################
-        
-        if pri.name == "BH":
-            self.spineffpri = 0#(3./(2*pri.mass))*(pri.nspin*(pri.spin**2))*(1./orbd**2)
-        
-        else:
-            self.spineffpri = (3./(2*pri.mass))*(pri.nspin*(pri.spin**2))*(1./orbd**2)
-            
-        if sec.name == "BH":
-            self.spineffsec = 0#(3./(2*sec.mass))*(sec.nspin*(sec.spin**2))*(1./orbd**2)
-        
-        else:
-            self.spineffsec = (3./(2*sec.mass))*(sec.nspin*(sec.spin**2))*(1./orbd**2)
-            
-        ##################
-        #Tidal Effects
-        ##################
-        
-        #Correct/check here tidal effects
-        
-        if pri.name == "BH":
-            self.tideeffpri = 0#(9./(1*pri.mass))*(pri.ntide*sec.mass)*(1./orbd**5)
-        
-        else:
-            self.tideeffpri = (9./(1*pri.mass))*(pri.ntide*sec.mass)*(1./orbd**5)
-            
-        if sec.name == "BH":
-            self.tideeffsec = 0#(9./(1*sec.mass))*(sec.ntide*pri.mass)*(1./orbd**5)
-        
-        else:
-            self.tideeffsec = (9./(1*sec.mass))*(sec.ntide*pri.mass)*(1./orbd**5)
-            
-        ##################
-        #Dissipative Effects
-        ##################            
-    
+
 
         ##################
         #GW Effects
